@@ -1,0 +1,6 @@
+[submodule "deps/remglk"]
+	path = deps/remglk
+	url = https://github.com/erkyrath/remglk.git
+[submodule "deps/glulxe"]
+	path = deps/glulxe
+	url = https://github.com/erkyrath/glulxe.git
