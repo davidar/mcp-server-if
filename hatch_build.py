@@ -1,9 +1,11 @@
 """Custom build hook to compile glulxe with RemGlk during package installation."""
 
 import os
+import platform as _platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
@@ -22,6 +24,11 @@ class GlulxeBuildHook(BuildHookInterface):
         # For sdist, we don't need to compile - source will be included
         if self.target_name == "sdist":
             return
+
+        # Platform-specific wheel tag
+        build_data["pure_python"] = False
+        plat = sysconfig.get_platform().replace("-", "_").replace(".", "_")
+        build_data["tag"] = f"py3-none-{plat}"
 
         root = Path(self.root)
         deps_dir = root / "deps"
@@ -48,8 +55,12 @@ class GlulxeBuildHook(BuildHookInterface):
 
         # Create Makefile.local for glulxe
         print("Building glulxe...", file=sys.stderr)
+
+        # macOS uses arc4random, Linux uses getrandom
+        rand_flag = "-DUNIX_RAND_ARC4" if _platform.system() == "Darwin" else "-DUNIX_RAND_GETRANDOM"
+
         makefile_local = glulxe_dir / "Makefile.local"
-        makefile_local.write_text("""# Auto-generated for RemGlk build
+        makefile_local.write_text(f"""# Auto-generated for RemGlk build
 
 GLKINCLUDEDIR = ../remglk
 GLKLIBDIR = ../remglk
@@ -57,7 +68,7 @@ GLKMAKEFILE = Make.remglk
 
 CC = cc
 
-OPTIONS = -O2 -Wall -Wmissing-prototypes -Wno-unused -DOS_UNIX -DUNIX_RAND_GETRANDOM
+OPTIONS = -O2 -Wall -Wmissing-prototypes -Wno-unused -DOS_UNIX {rand_flag}
 
 include $(GLKINCLUDEDIR)/$(GLKMAKEFILE)
 
@@ -91,12 +102,15 @@ clean:
         # Copy binary into package
         glulxe_bin = glulxe_dir / "glulxe"
         if not glulxe_bin.exists():
-            raise RuntimeError(f"Glulxe binary not found at {glulxe_bin}")
+            glulxe_bin = glulxe_dir / "glulxe.exe"
+        if not glulxe_bin.exists():
+            raise RuntimeError(f"Glulxe binary not found at {glulxe_dir}")
 
-        # Destination inside the package
+        # Destination inside the package (preserve .exe extension on Windows)
+        bin_name = "glulxe.exe" if _platform.system() == "Windows" else "glulxe"
         pkg_bin_dir = root / "src" / "mcp_server_if" / "bin"
         pkg_bin_dir.mkdir(parents=True, exist_ok=True)
-        dest = pkg_bin_dir / "glulxe"
+        dest = pkg_bin_dir / bin_name
         shutil.copy2(glulxe_bin, dest)
         os.chmod(dest, 0o755)
 

@@ -40,6 +40,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_server_if"]
+artifacts = ["src/mcp_server_if/bin/"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
@@ -70,6 +71,22 @@ pythonVersion = "3.10"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["integration: real glulxe integration tests (need binary)"]
+
+[tool.cibuildwheel]
+build = ["cp312-*"]
+skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "*-win_arm64", "*-win_amd64"]
+test-command = "pytest {project}/tests/test_integration.py -m integration -v"
+test-requires = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+repair-wheel-command = ""
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "13.0" }
+repair-wheel-command = ""
 
 [dependency-groups]
 dev = [

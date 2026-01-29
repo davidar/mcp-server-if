@@ -15,11 +15,11 @@ def get_games_dir() -> Path:
 
 def get_bundled_glulxe() -> Path | None:
     """Get the bundled glulxe binary path if it exists."""
-    # Look for binary bundled with the package
     package_dir = Path(__file__).parent
-    bundled = package_dir / "bin" / "glulxe"
-    if bundled.exists() and bundled.is_file():
-        return bundled
+    for name in ("glulxe", "glulxe.exe"):
+        bundled = package_dir / "bin" / name
+        if bundled.exists() and bundled.is_file():
+            return bundled
     return None
 
 
