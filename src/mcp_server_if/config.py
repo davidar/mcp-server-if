@@ -57,9 +57,12 @@ def get_glulxe_path() -> Path | None:
     return None
 
 
-def require_journal() -> bool:
+def _get_require_journal() -> bool:
     """Check if journal mode is enabled."""
     return os.environ.get("IF_REQUIRE_JOURNAL", "").lower() in ("1", "true", "yes")
+
+
+_UNSET: object = object()
 
 
 class Config:
@@ -68,17 +71,15 @@ class Config:
     def __init__(
         self,
         games_dir: Path | None = None,
-        glulxe_path: Path | None = None,
+        glulxe_path: Path | None | object = _UNSET,
         require_journal: bool | None = None,
     ):
         self.games_dir = games_dir or get_games_dir()
-        self.glulxe_path = glulxe_path or get_glulxe_path()
-        self._require_journal = require_journal if require_journal is not None else globals()["require_journal"]()
+        self.glulxe_path: Path | None = get_glulxe_path() if glulxe_path is _UNSET else glulxe_path  # type: ignore[assignment]
+        self._require_journal = require_journal if require_journal is not None else _get_require_journal()
 
     @property
     def require_journal(self) -> bool:
-        if callable(self._require_journal):
-            return self._require_journal()
         return self._require_journal
 
     def ensure_games_dir(self) -> None:
@@ -90,8 +91,7 @@ class Config:
         errors = []
         if not self.glulxe_path:
             errors.append(
-                "glulxe binary not found. Set IF_GLULXE_PATH or install glulxe. "
-                "See README.md for build instructions."
+                "glulxe binary not found. Set IF_GLULXE_PATH or install glulxe. See README.md for build instructions."
             )
         elif not self.glulxe_path.exists():
             errors.append(f"glulxe binary not found at: {self.glulxe_path}")

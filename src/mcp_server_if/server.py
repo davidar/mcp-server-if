@@ -1,17 +1,29 @@
 """MCP server for interactive fiction games."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
 from .config import Config
 from .session import GlulxSession, detect_game_format, find_game_file
+
+
+class JournalEntry(TypedDict):
+    turn: int
+    timestamp: str
+    command: str
+    output: str
+    reflection: str
+
 
 # IF Archive base URL
 IF_ARCHIVE_BASE = "https://ifarchive.org/if-archive/games/glulx"
@@ -42,7 +54,7 @@ def _append_journal(game_dir: Path, turn: int, command: str, output: str, reflec
     """Append a complete journal entry with command, output, and reflection."""
     journal_file = game_dir / "journal.jsonl"
 
-    entry = {
+    entry: JournalEntry = {
         "turn": turn,
         "timestamp": datetime.now().isoformat(),
         "command": command,
@@ -54,7 +66,7 @@ def _append_journal(game_dir: Path, turn: int, command: str, output: str, reflec
         f.write(json.dumps(entry) + "\n")
 
 
-def _load_journal(game_dir: Path) -> list[dict]:
+def _load_journal(game_dir: Path) -> list[JournalEntry]:
     """Load journal entries from JSONL file."""
     journal_file = game_dir / "journal.jsonl"
     if not journal_file.exists():
@@ -70,7 +82,7 @@ def _load_journal(game_dir: Path) -> list[dict]:
     return entries
 
 
-def _format_journal_entry(entry: dict, include_output: bool = True) -> list[str]:
+def _format_journal_entry(entry: JournalEntry, include_output: bool = True) -> list[str]:
     """Format a single journal entry as lines of text."""
     lines = []
     timestamp = entry["timestamp"][:16].replace("T", " ")
@@ -123,6 +135,7 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
     errors = config.validate()
     if errors:
         return "Error: " + "; ".join(errors)
+    assert config.glulxe_path is not None
 
     game_dir = _get_game_dir(game)
     if not find_game_file(game_dir):
@@ -345,9 +358,7 @@ async def search_journal(game: str, query: str) -> str:
     if not entries:
         return f"No journal yet for '{game}'."
 
-    matches = [
-        e for e in entries if query in e.get("reflection", "").lower() or query in e.get("output", "").lower()
-    ]
+    matches = [e for e in entries if query in e.get("reflection", "").lower() or query in e.get("output", "").lower()]
 
     if not matches:
         return f"No matches for '{query}' in {game} journal."

@@ -38,16 +38,13 @@ class GlulxeBuildHook(BuildHookInterface):
         if not (glulxe_dir / "Makefile").exists():
             raise RuntimeError(f"Glulxe source not found at {glulxe_dir}")
 
-        # Build RemGlk
+        # Build RemGlk first (glulxe depends on it)
         print("Building RemGlk...", file=sys.stderr)
         subprocess.run(["make", "clean"], cwd=remglk_dir, capture_output=True)
-        result = subprocess.run(["make"], cwd=glulxe_dir, capture_output=True, text=True)
+        result = subprocess.run(["make"], cwd=remglk_dir, capture_output=True, text=True)
         if result.returncode != 0:
-            # Try building remglk
-            result = subprocess.run(["make"], cwd=remglk_dir, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"RemGlk build failed:\n{result.stderr}", file=sys.stderr)
-                raise RuntimeError("Failed to build RemGlk")
+            print(f"RemGlk build failed:\n{result.stderr}", file=sys.stderr)
+            raise RuntimeError("Failed to build RemGlk")
 
         # Create Makefile.local for glulxe
         print("Building glulxe...", file=sys.stderr)
@@ -105,5 +102,6 @@ clean:
 
         print(f"Glulxe binary installed to {dest}", file=sys.stderr)
 
-        # Tell hatch to include the bin directory
-        build_data["force_include"][str(pkg_bin_dir)] = "mcp_server_if/bin"
+        # Clean up build artifacts in submodules
+        subprocess.run(["make", "-f", "Makefile.local", "clean"], cwd=glulxe_dir, capture_output=True)
+        subprocess.run(["make", "clean"], cwd=remglk_dir, capture_output=True)

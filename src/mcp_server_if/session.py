@@ -1,9 +1,10 @@
 """Glulx game session management with RemGlk protocol."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 from pathlib import Path
-
 
 # Magic bytes for game formats
 GLULX_MAGIC = b"Glul"  # Glulx game file
@@ -31,7 +32,7 @@ def find_game_file(game_dir: Path) -> Path | None:
 class GlulxSession:
     """Manages a glulxe session with RemGlk JSON protocol."""
 
-    def __init__(self, game_dir: Path, glulxe_path: Path):
+    def __init__(self, game_dir: Path, glulxe_path: Path | None = None):
         self.game_dir = game_dir
         self.glulxe_path = glulxe_path
         self.game_file = find_game_file(game_dir)
@@ -76,7 +77,7 @@ class GlulxSession:
         if not self.game_file or not self.game_file.exists():
             raise FileNotFoundError(f"Game file not found in: {self.game_dir}")
 
-        if not self.glulxe_path.exists():
+        if not self.glulxe_path or not self.glulxe_path.exists():
             raise FileNotFoundError(
                 f"glulxe binary not found: {self.glulxe_path}\n"
                 "Set IF_GLULXE_PATH or see README.md for build instructions."
@@ -165,7 +166,7 @@ class GlulxSession:
             metadata["windows"] = output["windows"]
 
         # Update input expectations
-        if "input" in output and output["input"]:
+        if output.get("input"):
             inp = output["input"][0]
             metadata["input_window"] = inp.get("id")
             metadata["input_type"] = inp.get("type", "line")
