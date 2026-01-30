@@ -125,7 +125,6 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
     """
     config = get_config()
     game = game.strip()
-    command = command.strip()
     journal = journal.strip()
 
     if not game:
@@ -149,15 +148,15 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
     session = GlulxSession(game_dir, config.glulxe_path)
 
     # Warn about save/restore commands
-    if command.lower() in ("save", "restore"):
+    if command.strip().lower() in ("save", "restore"):
         return (
-            f"Warning: The '{command}' command triggers an in-game file dialog that isn't supported.\n\n"
+            f"Warning: The '{command.strip()}' command triggers an in-game file dialog that isn't supported.\n\n"
             "Your game state is automatically saved after every turn (autosave).\n"
             "To start fresh, use reset_game."
         )
 
     # Handle journaling if enabled
-    if config.require_journal and session.has_state() and command:
+    if config.require_journal and session.has_state() and command.strip():
         metadata = session.load_metadata()
         prev_command = metadata.get("last_command")
 
@@ -179,8 +178,8 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
             _append_journal(game_dir, turn, prev_command, prev_output, journal)
 
     try:
-        cmd = command if command else None
-        if session.has_state() and not command:
+        cmd = command if command.strip() else None
+        if session.has_state() and not command.strip():
             cmd = ""
 
         output, metadata = await session.run_turn(cmd)

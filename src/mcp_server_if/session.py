@@ -117,12 +117,18 @@ class GlulxSession:
                 raise ValueError("No input window available - game may have ended")
 
             if input_type == "char":
-                # Character input - convert command to key name
-                key = command.lower() if len(command) == 1 else command
-                if key == " ":
-                    key = "space"
-                elif key == "\n" or key == "enter":
+                # Character input - send single char or RemGlk special key name.
+                # RemGlk special keys: return, escape, tab, left, right, up, down,
+                # pageup, pagedown, home, end, func1-func12.
+                # Regular chars (including space) are sent as literal single chars.
+                if not command:
+                    key = " "
+                elif command in ("\n", "\r") or command.strip().lower() in ("enter", "return"):
                     key = "return"
+                elif len(command) == 1:
+                    key = command.lower()
+                else:
+                    key = command.strip().lower()
                 input_json = {"type": "char", "gen": metadata["gen"], "window": input_window, "value": key}
             else:
                 # Line input

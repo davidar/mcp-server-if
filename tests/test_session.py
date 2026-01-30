@@ -322,10 +322,10 @@ class TestRunTurn:
         with patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc):
             await session.run_turn(" ")
 
-        # Verify the input was converted to "space"
+        # Verify space is sent as literal " " (not the word "space")
         call_args = proc.communicate.call_args[0][0]
         input_json = json.loads(call_args.decode())
-        assert input_json["value"] == "space"
+        assert input_json["value"] == " "
 
     @pytest.mark.asyncio
     async def test_char_input_enter(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:
@@ -345,6 +345,25 @@ class TestRunTurn:
         call_args = proc.communicate.call_args[0][0]
         input_json = json.loads(call_args.decode())
         assert input_json["value"] == "return"
+
+    @pytest.mark.asyncio
+    async def test_char_input_empty_defaults_to_space(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:
+        session = GlulxSession(sample_game_dir, mock_glulxe_path)
+
+        state_dir = sample_game_dir / "state"
+        state_dir.mkdir()
+        (state_dir / "autosave.json").write_text("{}")
+        session.save_metadata({"gen": 1, "input_window": 0, "input_type": "char", "windows": []})
+
+        output_data = make_remglk_output(gen=2, text=".")
+        proc = _mock_process(remglk_stdout(output_data))
+
+        with patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc):
+            await session.run_turn("")
+
+        call_args = proc.communicate.call_args[0][0]
+        input_json = json.loads(call_args.decode())
+        assert input_json["value"] == " "
 
     @pytest.mark.asyncio
     async def test_no_input_window_raises(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:

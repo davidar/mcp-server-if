@@ -53,17 +53,18 @@ class GlulxeBuildHook(BuildHookInterface):
 
     def initialize(self, version, build_data):
         """Called before the build process starts."""
-        if self.target_name not in ("wheel", "sdist"):
+        if self.target_name not in ("wheel", "sdist", "editable"):
             return
 
         # For sdist, we don't need to compile - source will be included
         if self.target_name == "sdist":
             return
 
-        # Platform-specific wheel tag
-        build_data["pure_python"] = False
-        plat = sysconfig.get_platform().replace("-", "_").replace(".", "_")
-        build_data["tag"] = f"py3-none-{plat}"
+        # Platform-specific wheel tag (not needed for editable installs)
+        if self.target_name == "wheel":
+            build_data["pure_python"] = False
+            plat = sysconfig.get_platform().replace("-", "_").replace(".", "_")
+            build_data["tag"] = f"py3-none-{plat}"
 
         root = Path(self.root)
         deps_dir = root / "deps"

@@ -160,7 +160,8 @@ class TestPlayIf:
 
     @pytest.mark.asyncio
     async def test_no_glulxe(self, tmp_games_dir: Path) -> None:
-        config = Config(games_dir=tmp_games_dir, glulxe_path=None)
+        with patch("mcp_server_if.config.get_glulxe_path", return_value=None):
+            config = Config(games_dir=tmp_games_dir)
         with _patch_config(config):
             result = await play_if(game="test", command="")
         assert "Error:" in result

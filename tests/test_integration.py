@@ -1,7 +1,7 @@
-"""Integration tests using a real glulxe binary and a real game file.
+"""Integration tests using a real glulxe binary and real game files.
 
-These tests download Colossal Cave Adventure (advent.ulx) from the IF Archive
-and play it with the compiled glulxe binary bundled in the package.
+These tests download games from the IF Archive and play them with the compiled
+glulxe binary bundled in the package.
 
 Run with: pytest -m integration -v
 """
@@ -18,6 +18,7 @@ from mcp_server_if.config import get_bundled_glulxe
 from mcp_server_if.session import GlulxSession
 
 ADVENT_URL = "https://www.ifarchive.org/if-archive/games/glulx/advent.ulx"
+INPUTEVENTTEST_URL = "https://eblong.com/zarf/glulx/inputeventtest.ulx"
 
 # Find glulxe binary: bundled first, then PATH
 glulxe_path = get_bundled_glulxe()
@@ -115,3 +116,75 @@ async def test_autorestore(game_dir: Path) -> None:
     # The game should have continued from saved state
     assert len(text_restored.strip()) > 0, "Should get output after autorestore"
     assert metadata["gen"] >= 1
+
+
+# --- Character input tests using inputeventtest.ulx ---
+
+
+@pytest.fixture(scope="module")
+def inputeventtest_ulx(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Download inputeventtest.ulx from eblong.com."""
+    cache_dir = tmp_path_factory.mktemp("inputeventtest")
+    game_file = cache_dir / "game.ulx"
+
+    response = httpx.get(INPUTEVENTTEST_URL, follow_redirects=True, timeout=30.0)
+    response.raise_for_status()
+    game_file.write_bytes(response.content)
+
+    return cache_dir
+
+
+@pytest.fixture
+def char_game_dir(inputeventtest_ulx: Path, tmp_path: Path) -> Path:
+    """Create a fresh game directory with inputeventtest.ulx."""
+    game_dir = tmp_path / "inputeventtest"
+    game_dir.mkdir()
+    shutil.copy2(inputeventtest_ulx / "game.ulx", game_dir / "game.ulx")
+    return game_dir
+
+
+@pytest.mark.asyncio
+async def test_char_input(char_game_dir: Path) -> None:
+    """Test character input mode: enter char mode, send a key, verify response."""
+    session = GlulxSession(char_game_dir, glulxe_path)
+
+    # Start game
+    text, metadata = await session.run_turn(None)
+    assert "character input" in text.lower()
+    assert metadata["input_type"] == "line"
+
+    # Enter character input mode
+    text, metadata = await session.run_turn("get character input")
+    assert metadata["input_type"] == "char"
+
+    # Send a character
+    text, metadata = await session.run_turn("x")
+    assert "120" in text  # decimal for 'x'
+    assert metadata["input_type"] == "line"  # back to line mode
+
+
+@pytest.mark.asyncio
+async def test_char_input_space(char_game_dir: Path) -> None:
+    """Test that empty command sends space in char input mode."""
+    session = GlulxSession(char_game_dir, glulxe_path)
+
+    await session.run_turn(None)
+    await session.run_turn("get character input")
+
+    # Empty string should default to space
+    text, metadata = await session.run_turn("")
+    assert "32" in text  # decimal for space
+    assert metadata["input_type"] == "line"
+
+
+@pytest.mark.asyncio
+async def test_char_input_return(char_game_dir: Path) -> None:
+    """Test that 'return' sends the Return special key in char input mode."""
+    session = GlulxSession(char_game_dir, glulxe_path)
+
+    await session.run_turn(None)
+    await session.run_turn("get character input")
+
+    text, metadata = await session.run_turn("return")
+    assert "<return>" in text.lower()
+    assert metadata["input_type"] == "line"

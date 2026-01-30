@@ -62,20 +62,17 @@ def _get_require_journal() -> bool:
     return os.environ.get("IF_REQUIRE_JOURNAL", "").lower() in ("1", "true", "yes")
 
 
-_UNSET: object = object()
-
-
 class Config:
     """Server configuration."""
 
     def __init__(
         self,
         games_dir: Path | None = None,
-        glulxe_path: Path | None | object = _UNSET,
+        glulxe_path: Path | None = None,
         require_journal: bool | None = None,
     ):
         self.games_dir = games_dir or get_games_dir()
-        self.glulxe_path: Path | None = get_glulxe_path() if glulxe_path is _UNSET else glulxe_path  # type: ignore[assignment]
+        self.glulxe_path: Path | None = glulxe_path or get_glulxe_path()
         self._require_journal = require_journal if require_journal is not None else _get_require_journal()
 
     @property
@@ -90,8 +87,16 @@ class Config:
         """Validate configuration. Returns list of errors."""
         errors = []
         if not self.glulxe_path:
+            checked = [
+                "IF_GLULXE_PATH env var",
+                f"bundled binary at {Path(__file__).parent / 'bin'}",
+                "glulxe in PATH",
+            ]
             errors.append(
-                "glulxe binary not found. Set IF_GLULXE_PATH or install glulxe. See README.md for build instructions."
+                "glulxe binary not found. Checked:\n"
+                + "\n".join(f"  - {loc}" for loc in checked)
+                + "\n\nFor development: run 'uv sync --reinstall-package mcp-server-if' to compile from source."
+                + "\nFor production: install the wheel from PyPI."
             )
         elif not self.glulxe_path.exists():
             errors.append(f"glulxe binary not found at: {self.glulxe_path}")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -89,7 +90,8 @@ class TestConfig:
         assert config.require_journal is True
 
     def test_validate_no_glulxe(self) -> None:
-        config = Config(glulxe_path=None)
+        with patch("mcp_server_if.config.get_glulxe_path", return_value=None):
+            config = Config()
         errors = config.validate()
         assert len(errors) == 1
         assert "glulxe binary not found" in errors[0]
