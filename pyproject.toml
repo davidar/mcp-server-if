@@ -82,15 +82,12 @@ test-requires = ["pytest", "pytest-asyncio", "httpx"]
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-repair-wheel-command = ""
 
 [tool.cibuildwheel.windows]
 before-all = "C:\\msys64\\usr\\bin\\pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc make"
-repair-wheel-command = ""
 
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "13.0" }
-repair-wheel-command = ""
 
 [dependency-groups]
 dev = [
