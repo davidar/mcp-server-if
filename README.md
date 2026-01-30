@@ -133,26 +133,25 @@ This encourages thoughtful, reflective gameplay rather than rushing through.
 3. The server uses glulxe's RemGlk mode for JSON-based I/O
 4. Game state is automatically saved after each turn
 
-## Building from Source
+## Development
 
-If installing from source (not from PyPI), glulxe will be compiled during installation. This requires:
-
-- C compiler (gcc or clang)
-- make
-- git (for submodules)
+Requires [uv](https://docs.astral.sh/uv/), a C compiler (gcc or clang), make, and git.
 
 ```bash
 git clone --recursive https://github.com/davidar/mcp-server-if.git
 cd mcp-server-if
-pip install .
+uv sync --group dev
+uv run pytest -v
 ```
+
+`uv sync` compiles the bundled glulxe binary from C source automatically. If the binary is missing after a fresh clone, run `uv sync --reinstall-package mcp-server-if` to force recompilation.
 
 ## Troubleshooting
 
 ### "glulxe binary not found"
 
 This shouldn't happen with pip/uvx installs. If it does:
-- Try reinstalling: `pip install --force-reinstall mcp-server-if`
+- Try reinstalling: `pip install --force-reinstall mcp-server-if` or `uv sync --reinstall-package mcp-server-if`
 - Or set `IF_GLULXE_PATH` to a manually installed glulxe
 
 ### "Game file not found"
