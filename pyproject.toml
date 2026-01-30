@@ -75,13 +75,17 @@ markers = ["integration: real glulxe integration tests (need binary)"]
 
 [tool.cibuildwheel]
 build = ["cp312-*"]
-skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "*-win_arm64", "*-win_amd64"]
+skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "*-win_arm64"]
 test-command = "pytest {project}/tests/test_integration.py -m integration -v"
 test-requires = ["pytest", "pytest-asyncio", "httpx"]
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+repair-wheel-command = ""
+
+[tool.cibuildwheel.windows]
+before-all = "C:\\msys64\\usr\\bin\\pacman -S --noconfirm mingw-w64-ucrt-x86_64-gcc make"
 repair-wheel-command = ""
 
 [tool.cibuildwheel.macos]

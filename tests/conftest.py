@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,13 @@ def tmp_games_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def mock_glulxe_path(tmp_path: Path) -> Path:
     """Create a fake glulxe binary."""
-    glulxe = tmp_path / "glulxe"
-    glulxe.write_text("#!/bin/sh\n")
-    glulxe.chmod(0o755)
+    if platform.system() == "Windows":
+        glulxe = tmp_path / "glulxe.exe"
+        glulxe.write_bytes(b"")
+    else:
+        glulxe = tmp_path / "glulxe"
+        glulxe.write_text("#!/bin/sh\n")
+        glulxe.chmod(0o755)
     return glulxe
 
 
