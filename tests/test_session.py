@@ -429,6 +429,19 @@ class TestRunTurn:
         assert metadata.get("pending_fileref") is True
 
     @pytest.mark.asyncio
+    async def test_subprocess_cwd_is_game_dir(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:
+        """Subprocess should run with cwd=game_dir so game-created files land there."""
+        session = GlulxSession(sample_game_dir, mock_glulxe_path)
+        output_data = make_remglk_output(text="Hello.")
+        proc = _mock_process(remglk_stdout(output_data))
+
+        with patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+            await session.run_turn(None)
+
+        _, kwargs = mock_exec.call_args
+        assert kwargs["cwd"] == sample_game_dir
+
+    @pytest.mark.asyncio
     async def test_no_input_in_output(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:
         """When output has no input field, input_window should be None."""
         session = GlulxSession(sample_game_dir, mock_glulxe_path)

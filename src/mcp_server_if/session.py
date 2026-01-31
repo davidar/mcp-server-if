@@ -140,6 +140,7 @@ class GlulxSession:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=self.game_dir,
         )
 
         input_bytes = (json.dumps(input_json) + "\n").encode()
