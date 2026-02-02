@@ -14,7 +14,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from .config import Config
-from .session import GlulxSession, detect_game_format, find_game_file
+from .session import GlulxSession, detect_game_format, find_game_file, is_zcode_format
 
 
 class JournalEntry(TypedDict):
@@ -25,8 +25,9 @@ class JournalEntry(TypedDict):
     reflection: str
 
 
-# IF Archive base URL
-IF_ARCHIVE_BASE = "https://ifarchive.org/if-archive/games/glulx"
+# IF Archive base URLs
+IF_ARCHIVE_GLULX = "https://ifarchive.org/if-archive/games/glulx"
+IF_ARCHIVE_ZCODE = "https://ifarchive.org/if-archive/games/zcode"
 
 # Global config - set at startup
 _config: Config | None = None
@@ -114,6 +115,15 @@ def _list_available_games() -> list[str]:
     return sorted(games)
 
 
+def _make_session(game_dir: Path) -> GlulxSession:
+    """Create a session with the correct interpreter for the game format."""
+    config = get_config()
+    game_file = find_game_file(game_dir)
+    if game_file and is_zcode_format(game_file.suffix.lstrip(".")):
+        return GlulxSession(game_dir, interpreter_path=config.bocfel_path)
+    return GlulxSession(game_dir, glulxe_path=config.glulxe_path)
+
+
 @mcp.tool()
 async def play_if(game: str, command: str = "", journal: str = "") -> str:
     """Play a turn of interactive fiction.
@@ -130,14 +140,9 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
     if not game:
         return "Error: game name required"
 
-    # Validate glulxe
-    errors = config.validate()
-    if errors:
-        return "Error: " + "; ".join(errors)
-    assert config.glulxe_path is not None
-
     game_dir = _get_game_dir(game)
-    if not find_game_file(game_dir):
+    game_file = find_game_file(game_dir)
+    if not game_file:
         available = _list_available_games()
         msg = f"Game '{game}' not found."
         if available:
@@ -145,7 +150,18 @@ async def play_if(game: str, command: str = "", journal: str = "") -> str:
         msg += "\nUse download_game to get new games."
         return msg
 
-    session = GlulxSession(game_dir, config.glulxe_path)
+    # Validate the appropriate interpreter
+    ext = game_file.suffix.lstrip(".")
+    if is_zcode_format(ext):
+        errors = config.validate_bocfel()
+        if errors:
+            return "Error: " + "; ".join(errors)
+    else:
+        errors = config.validate()
+        if errors:
+            return "Error: " + "; ".join(errors)
+
+    session = _make_session(game_dir)
 
     # Warn about save/restore commands
     if command.strip().lower() in ("save", "restore"):
@@ -220,10 +236,9 @@ async def list_games() -> str:
         )
 
     lines = ["**Available games:**", ""]
-    config = get_config()
     for game in games:
         game_dir = _get_game_dir(game)
-        session = GlulxSession(game_dir, config.glulxe_path)
+        session = _make_session(game_dir)
         status = "has saved state" if session.has_state() else "no saved state"
         lines.append(f"- {game} ({status})")
 
@@ -251,9 +266,10 @@ async def download_game(name: str, url: str) -> str:
     if not url:
         return "Error: url required (full URL or IF Archive filename like 'advent.ulx')"
 
-    # If URL is just a filename, construct IF Archive URL
+    # If URL is just a filename, try to route to the right IF Archive path
     if not url.startswith("http"):
-        url = f"{IF_ARCHIVE_BASE}/{url}"
+        ext = url.rsplit(".", 1)[-1].lower() if "." in url else ""
+        url = f"{IF_ARCHIVE_ZCODE}/{url}" if is_zcode_format(ext) else f"{IF_ARCHIVE_GLULX}/{url}"
 
     game_dir = _get_game_dir(name)
 
@@ -268,7 +284,7 @@ async def download_game(name: str, url: str) -> str:
 
         game_format = detect_game_format(content)
         if not game_format:
-            return f"Error: Downloaded file is not a valid Glulx or Blorb game (magic bytes: {content[:12]!r})"
+            return f"Error: Downloaded file is not a valid game (magic bytes: {content[:12]!r})"
 
         game_file = game_dir / f"game.{game_format}"
         game_file.write_bytes(content)
@@ -289,7 +305,6 @@ async def reset_game(game: str) -> str:
     Args:
         game: Name of the game to reset
     """
-    config = get_config()
     game = game.strip()
 
     if not game:
@@ -299,7 +314,7 @@ async def reset_game(game: str) -> str:
     if not find_game_file(game_dir):
         return f"Game '{game}' not found."
 
-    session = GlulxSession(game_dir, config.glulxe_path)
+    session = _make_session(game_dir)
     session.clear_state()
 
     return f"Game '{game}' reset. Journal preserved. Use play_if to start fresh."
@@ -383,6 +398,11 @@ def main():
         help="Path to glulxe binary (default: auto-detect or IF_GLULXE_PATH)",
     )
     parser.add_argument(
+        "--bocfel-path",
+        type=Path,
+        help="Path to bocfel binary (default: auto-detect or IF_BOCFEL_PATH)",
+    )
+    parser.add_argument(
         "--require-journal",
         action="store_true",
         help="Require journal reflections between turns",
@@ -395,6 +415,7 @@ def main():
     _config = Config(
         games_dir=args.games_dir,
         glulxe_path=args.glulxe_path,
+        bocfel_path=args.bocfel_path,
         require_journal=args.require_journal,
     )
 

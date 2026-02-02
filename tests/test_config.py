@@ -10,6 +10,8 @@ import pytest
 from mcp_server_if.config import (
     Config,
     _get_require_journal,
+    get_bocfel_path,
+    get_bundled_bocfel,
     get_bundled_glulxe,
     get_games_dir,
     get_glulxe_path,
@@ -70,6 +72,31 @@ class TestGetRequireJournal:
         assert _get_require_journal() is False
 
 
+class TestGetBundledBocfel:
+    def test_no_bundled(self) -> None:
+        result = get_bundled_bocfel()
+        assert result is None or isinstance(result, Path)
+
+
+class TestGetBocfelPath:
+    def test_env_override_valid(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        bocfel = tmp_path / "bocfel"
+        bocfel.write_text("#!/bin/sh\n")
+        monkeypatch.setenv("IF_BOCFEL_PATH", str(bocfel))
+        result = get_bocfel_path()
+        assert result == bocfel
+
+    def test_env_override_missing_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setenv("IF_BOCFEL_PATH", str(tmp_path / "nonexistent"))
+        result = get_bocfel_path()
+        assert result is None
+
+    def test_no_env_no_bundled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("IF_BOCFEL_PATH", raising=False)
+        result = get_bocfel_path()
+        assert result is None or isinstance(result, Path)
+
+
 class TestConfig:
     def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("IF_GAMES_DIR", raising=False)
@@ -106,6 +133,39 @@ class TestConfig:
         config = Config(glulxe_path=mock_glulxe_path)
         errors = config.validate()
         assert errors == []
+
+    def test_validate_bocfel_no_binary(self) -> None:
+        with (
+            patch("mcp_server_if.config.get_glulxe_path", return_value=None),
+            patch("mcp_server_if.config.get_bocfel_path", return_value=None),
+        ):
+            config = Config()
+        errors = config.validate_bocfel()
+        assert len(errors) == 1
+        assert "bocfel binary not found" in errors[0]
+
+    def test_validate_bocfel_missing_path(self, tmp_path: Path) -> None:
+        config = Config(bocfel_path=tmp_path / "nonexistent")
+        errors = config.validate_bocfel()
+        assert len(errors) == 1
+        assert "not found at" in errors[0]
+
+    def test_validate_bocfel_ok(self, tmp_path: Path) -> None:
+        bocfel = tmp_path / "bocfel"
+        bocfel.write_text("#!/bin/sh\n")
+        config = Config(bocfel_path=bocfel)
+        errors = config.validate_bocfel()
+        assert errors == []
+
+    def test_explicit_bocfel_path(self, tmp_path: Path, mock_glulxe_path: Path) -> None:
+        bocfel = tmp_path / "bocfel"
+        bocfel.write_text("#!/bin/sh\n")
+        config = Config(
+            games_dir=tmp_path / "games",
+            glulxe_path=mock_glulxe_path,
+            bocfel_path=bocfel,
+        )
+        assert config.bocfel_path == bocfel
 
     def test_ensure_games_dir(self, tmp_path: Path) -> None:
         games = tmp_path / "a" / "b" / "games"

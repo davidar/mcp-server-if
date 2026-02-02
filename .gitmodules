@@ -4,3 +4,6 @@
 [submodule "deps/glulxe"]
 	path = deps/glulxe
 	url = https://github.com/erkyrath/glulxe.git
+[submodule "deps/garglk"]
+	path = deps/garglk
+	url = https://github.com/garglk/garglk.git

@@ -1,47 +1,121 @@
-"""Glulx game session management with RemGlk protocol."""
+"""Game session management with RemGlk protocol."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 # Magic bytes for game formats
 GLULX_MAGIC = b"Glul"  # Glulx game file
 BLORB_MAGIC = b"FORM"  # Blorb container (FORM....IFRS)
 
+# Z-code versions (byte 0 of the file)
+ZCODE_VERSIONS = range(1, 9)  # 1-8
+
+# File extensions by format family
+GLULX_EXTENSIONS = ("ulx", "gblorb")
+ZCODE_EXTENSIONS = ("z3", "z4", "z5", "z7", "z8", "zblorb")
+ALL_GAME_EXTENSIONS = GLULX_EXTENSIONS + ZCODE_EXTENSIONS
+
 
 def detect_game_format(content: bytes) -> str | None:
-    """Detect game format from magic bytes. Returns 'ulx', 'gblorb', or None."""
+    """Detect game format from magic bytes.
+
+    Returns 'ulx', 'gblorb', 'zblorb', 'z3', 'z5', 'z8', etc., or None.
+    """
     if content.startswith(GLULX_MAGIC):
         return "ulx"
+
     if content.startswith(BLORB_MAGIC) and len(content) > 12 and content[8:12] == b"IFRS":
-        return "gblorb"
+        # Blorb container — scan for exec chunk to disambiguate
+        return _detect_blorb_type(content)
+
+    # Z-code: byte 0 is version (1-8), check for valid serial number at bytes 18-23
+    if len(content) >= 64 and content[0] in ZCODE_VERSIONS:
+        serial = content[18:24]
+        if all(0x20 <= b <= 0x7E for b in serial):
+            return f"z{content[0]}"
+
     return None
 
 
+def _detect_blorb_type(content: bytes) -> str:
+    """Scan a Blorb IFF to find exec resource type (ZCOD or GLUL)."""
+    pos = 12  # skip FORM + size + IFRS
+    while pos + 8 <= len(content):
+        chunk_type = content[pos : pos + 4]
+        chunk_size = int.from_bytes(content[pos + 4 : pos + 8], "big")
+
+        if chunk_type == b"RIdx":
+            # Resource index — scan entries for Exec resources
+            if pos + 12 <= len(content):
+                num_entries = int.from_bytes(content[pos + 8 : pos + 12], "big")
+                entry_pos = pos + 12
+                for _ in range(num_entries):
+                    if entry_pos + 12 > len(content):
+                        break
+                    usage = content[entry_pos : entry_pos + 4]
+                    if usage == b"Exec":
+                        # The entry points to a chunk; find that chunk's type
+                        chunk_offset = int.from_bytes(content[entry_pos + 8 : entry_pos + 12], "big")
+                        if chunk_offset + 4 <= len(content):
+                            exec_type = content[chunk_offset : chunk_offset + 4]
+                            if exec_type == b"ZCOD":
+                                return "zblorb"
+                            elif exec_type == b"GLUL":
+                                return "gblorb"
+                    entry_pos += 12
+            break
+
+        # Advance to next chunk (chunks are 2-byte aligned)
+        pos += 8 + chunk_size
+        if chunk_size % 2:
+            pos += 1
+
+    # Default to gblorb if we can't determine
+    return "gblorb"
+
+
 def find_game_file(game_dir: Path) -> Path | None:
-    """Find the game file in a game directory (.ulx or .gblorb)."""
-    for ext in ("ulx", "gblorb"):
+    """Find the game file in a game directory."""
+    for ext in ALL_GAME_EXTENSIONS:
         game_file = game_dir / f"game.{ext}"
         if game_file.exists():
             return game_file
     return None
 
 
-class GlulxSession:
-    """Manages a glulxe session with RemGlk JSON protocol."""
+def is_zcode_format(ext: str) -> bool:
+    """Check if a file extension is a Z-code format."""
+    return ext in ZCODE_EXTENSIONS
 
-    def __init__(self, game_dir: Path, glulxe_path: Path | None = None):
+
+class GlulxSession:
+    """Manages a game session with RemGlk JSON protocol."""
+
+    def __init__(self, game_dir: Path, glulxe_path: Path | None = None, interpreter_path: Path | None = None):
         self.game_dir = game_dir
         self.glulxe_path = glulxe_path
+        self.interpreter_path = interpreter_path or glulxe_path
         self.game_file = find_game_file(game_dir)
         self.state_dir = game_dir / "state"
         self.metadata_file = game_dir / "metadata.json"
 
+    @property
+    def _is_zcode(self) -> bool:
+        """Check if current game is Z-code format."""
+        if self.game_file is None:
+            return False
+        return is_zcode_format(self.game_file.suffix.lstrip("."))
+
     def has_state(self) -> bool:
         """Check if saved state exists."""
-        return (self.state_dir / "autosave.json").exists()
+        if not self.state_dir.exists():
+            return False
+        # glulxe uses autosave.json; bocfel uses {checksum}.json
+        return any(f.suffix == ".json" for f in self.state_dir.iterdir())
 
     def load_metadata(self) -> dict:
         """Load session metadata."""
@@ -77,10 +151,10 @@ class GlulxSession:
         if not self.game_file or not self.game_file.exists():
             raise FileNotFoundError(f"Game file not found in: {self.game_dir}")
 
-        if not self.glulxe_path or not self.glulxe_path.exists():
+        if not self.interpreter_path or not self.interpreter_path.exists():
             raise FileNotFoundError(
-                f"glulxe binary not found: {self.glulxe_path}\n"
-                "Set IF_GLULXE_PATH or see README.md for build instructions."
+                f"Interpreter binary not found: {self.interpreter_path}\n"
+                "Run 'uv sync --reinstall-package mcp-server-if' to compile from source."
             )
 
         # Ensure state directory exists
@@ -89,20 +163,11 @@ class GlulxSession:
         # Load metadata
         metadata = self.load_metadata()
 
-        # Build glulxe command
-        cmd = [
-            str(self.glulxe_path),
-            "-singleturn",
-            "-fm",
-            "--autosave",
-            "--autodir",
-            str(self.state_dir),
-        ]
-
-        if self.has_state():
-            cmd.append("--autorestore")
-
-        cmd.append(str(self.game_file))
+        # Build command and environment
+        if self._is_zcode:
+            cmd, env = self._build_bocfel_cmd()
+        else:
+            cmd, env = self._build_glulxe_cmd()
 
         # Build input JSON
         if command is None or not self.has_state():
@@ -118,9 +183,6 @@ class GlulxSession:
 
             if input_type == "char":
                 # Character input - send single char or RemGlk special key name.
-                # RemGlk special keys: return, escape, tab, left, right, up, down,
-                # pageup, pagedown, home, end, func1-func12.
-                # Regular chars (including space) are sent as literal single chars.
                 if not command:
                     key = " "
                 elif command in ("\n", "\r") or command.strip().lower() in ("enter", "return"):
@@ -134,13 +196,14 @@ class GlulxSession:
                 # Line input
                 input_json = {"type": "line", "gen": metadata["gen"], "window": input_window, "value": command}
 
-        # Run glulxe
+        # Run interpreter
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.game_dir,
+            env=env,
         )
 
         input_bytes = (json.dumps(input_json) + "\n").encode()
@@ -149,20 +212,20 @@ class GlulxSession:
         if proc.returncode != 0:
             error = stderr.decode("utf-8", errors="replace").strip()
             stdout_preview = stdout.decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"glulxe failed (exit {proc.returncode}): {error}\nstdout: {stdout_preview}")
+            raise RuntimeError(f"Interpreter failed (exit {proc.returncode}): {error}\nstdout: {stdout_preview}")
 
         # Parse output - RemGlk sends JSON terminated by blank line
         output_text = stdout.decode("utf-8", errors="replace")
         output_lines = output_text.strip().split("\n\n")
 
         if not output_lines:
-            raise RuntimeError("No output from glulxe")
+            raise RuntimeError("No output from interpreter")
 
         # Parse the JSON output
         try:
             output = json.loads(output_lines[0])
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Failed to parse glulxe output: {e}\nOutput: {output_text[:500]}") from e
+            raise RuntimeError(f"Failed to parse interpreter output: {e}\nOutput: {output_text[:500]}") from e
 
         # Update metadata from output
         if "gen" in output:
@@ -194,6 +257,34 @@ class GlulxSession:
         formatted = self._format_output(output, metadata.get("windows", []))
 
         return formatted, metadata
+
+    def _build_glulxe_cmd(self) -> tuple[list[str], dict[str, str] | None]:
+        """Build command for glulxe interpreter."""
+        cmd = [
+            str(self.interpreter_path),
+            "-singleturn",
+            "-fm",
+            "--autosave",
+            "--autodir",
+            str(self.state_dir),
+        ]
+        if self.has_state():
+            cmd.append("--autorestore")
+        cmd.append(str(self.game_file))
+        return cmd, None
+
+    def _build_bocfel_cmd(self) -> tuple[list[str], dict[str, str]]:
+        """Build command and environment for bocfel interpreter."""
+        cmd = [
+            str(self.interpreter_path),
+            "-singleturn",
+            "-fm",
+            str(self.game_file),
+        ]
+        # Bocfel reads autosave config from environment variables
+        env = os.environ.copy()
+        env["BOCFEL_AUTOSAVE_DIRECTORY"] = str(self.state_dir)
+        return cmd, env
 
     def _format_output(self, output: dict, windows: list) -> str:
         """Format RemGlk output as readable text."""

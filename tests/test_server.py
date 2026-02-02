@@ -160,6 +160,10 @@ class TestPlayIf:
 
     @pytest.mark.asyncio
     async def test_no_glulxe(self, tmp_games_dir: Path) -> None:
+        game_dir = tmp_games_dir / "test"
+        game_dir.mkdir()
+        (game_dir / "game.ulx").write_bytes(b"Glul" + b"\x00" * 100)
+
         with patch("mcp_server_if.config.get_glulxe_path", return_value=None):
             config = Config(games_dir=tmp_games_dir)
         with _patch_config(config):
@@ -545,3 +549,95 @@ class TestSearchJournal:
         with _patch_config(config):
             result = await search_journal(game="test", query="dragon")
         assert "1 match" in result
+
+
+# ── Z-code / bocfel ──
+
+
+class TestZcodePlayIf:
+    @pytest.mark.asyncio
+    async def test_play_zcode_game(self, tmp_games_dir: Path, mock_glulxe_path: Path) -> None:
+        game_dir = tmp_games_dir / "zork"
+        game_dir.mkdir()
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        (game_dir / "game.z5").write_bytes(bytes(data))
+
+        # Create mock bocfel binary
+        bocfel = tmp_games_dir / "bocfel"
+        bocfel.write_text("#!/bin/sh\n")
+        bocfel.chmod(0o755)
+
+        output_data = make_remglk_output(text="West of house.")
+        proc = _mock_process(remglk_stdout(output_data))
+
+        config = Config(games_dir=tmp_games_dir, glulxe_path=mock_glulxe_path, bocfel_path=bocfel)
+        with _patch_config(config), patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc):
+            result = await play_if(game="zork", command="")
+        assert "West of house." in result
+
+    @pytest.mark.asyncio
+    async def test_play_zcode_no_bocfel(self, tmp_games_dir: Path, mock_glulxe_path: Path) -> None:
+        game_dir = tmp_games_dir / "zork"
+        game_dir.mkdir()
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        (game_dir / "game.z5").write_bytes(bytes(data))
+
+        with patch("mcp_server_if.config.get_bocfel_path", return_value=None):
+            config = Config(games_dir=tmp_games_dir, glulxe_path=mock_glulxe_path)
+        with _patch_config(config):
+            result = await play_if(game="zork", command="")
+        assert "Error:" in result
+        assert "bocfel" in result.lower()
+
+
+class TestZcodeDownload:
+    @pytest.mark.asyncio
+    async def test_download_zcode(self, tmp_games_dir: Path, mock_glulxe_path: Path) -> None:
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        zcode_content = bytes(data) + b"\x00" * 200
+
+        mock_response = MagicMock()
+        mock_response.content = zcode_content
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        config = _make_config(tmp_games_dir, mock_glulxe_path)
+        with _patch_config(config), patch("mcp_server_if.server.httpx.AsyncClient", return_value=mock_client):
+            result = await download_game(name="zork", url="zork.z5")
+
+        assert "Downloaded" in result
+        assert (tmp_games_dir / "zork" / "game.z5").exists()
+
+    @pytest.mark.asyncio
+    async def test_zcode_url_routes_to_zcode_archive(self, tmp_games_dir: Path, mock_glulxe_path: Path) -> None:
+        """Z-code filenames should route to IF Archive zcode directory."""
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+
+        mock_response = MagicMock()
+        mock_response.content = bytes(data) + b"\x00" * 200
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        config = _make_config(tmp_games_dir, mock_glulxe_path)
+        with _patch_config(config), patch("mcp_server_if.server.httpx.AsyncClient", return_value=mock_client):
+            await download_game(name="zork", url="zork.z5")
+
+        # Verify the URL was routed to the zcode archive
+        call_url = mock_client.get.call_args[0][0]
+        assert "zcode" in call_url

@@ -42,6 +42,32 @@ def sample_game_dir(tmp_games_dir: Path) -> Path:
 
 
 @pytest.fixture
+def mock_bocfel_path(tmp_path: Path) -> Path:
+    """Create a fake bocfel binary."""
+    if platform.system() == "Windows":
+        bocfel = tmp_path / "bocfel.exe"
+        bocfel.write_bytes(b"")
+    else:
+        bocfel = tmp_path / "bocfel"
+        bocfel.write_text("#!/bin/sh\n")
+        bocfel.chmod(0o755)
+    return bocfel
+
+
+@pytest.fixture
+def sample_zcode_dir(tmp_games_dir: Path) -> Path:
+    """Create a sample game directory with a .z5 file."""
+    game_dir = tmp_games_dir / "zcodegame"
+    game_dir.mkdir()
+    # Z-code v5: byte 0 = version, bytes 18-23 = serial (printable ASCII)
+    data = bytearray(64)
+    data[0] = 5  # version
+    data[18:24] = b"250101"  # serial number
+    game_dir.joinpath("game.z5").write_bytes(bytes(data))
+    return game_dir
+
+
+@pytest.fixture
 def sample_gblorb_dir(tmp_games_dir: Path) -> Path:
     """Create a sample game directory with a .gblorb file."""
     game_dir = tmp_games_dir / "blorb_game"

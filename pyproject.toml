@@ -1,14 +1,14 @@
 [project]
 name = "mcp-server-if"
 version = "0.1.0"
-description = "MCP server for playing Glulx interactive fiction games"
+description = "MCP server for playing interactive fiction games (Glulx and Z-machine)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "David A Roberts", email = "d@vidr.cc" }
 ]
-keywords = ["mcp", "interactive-fiction", "glulx", "text-adventure", "claude"]
+keywords = ["mcp", "interactive-fiction", "glulx", "z-machine", "zcode", "text-adventure", "claude"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

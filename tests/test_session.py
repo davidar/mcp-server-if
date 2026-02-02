@@ -12,6 +12,7 @@ from mcp_server_if.session import (
     GlulxSession,
     detect_game_format,
     find_game_file,
+    is_zcode_format,
 )
 
 from .conftest import make_remglk_output, remglk_stdout
@@ -38,6 +39,80 @@ class TestDetectGameFormat:
     def test_too_short_for_blorb(self) -> None:
         assert detect_game_format(b"FORM\x00\x00") is None
 
+    def test_zcode_v5(self) -> None:
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        assert detect_game_format(bytes(data)) == "z5"
+
+    def test_zcode_v3(self) -> None:
+        data = bytearray(64)
+        data[0] = 3
+        data[18:24] = b"840726"
+        assert detect_game_format(bytes(data)) == "z3"
+
+    def test_zcode_v8(self) -> None:
+        data = bytearray(64)
+        data[0] = 8
+        data[18:24] = b"200101"
+        assert detect_game_format(bytes(data)) == "z8"
+
+    def test_zcode_invalid_serial(self) -> None:
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"\x00\x00\x00\x00\x00\x00"  # Non-printable
+        assert detect_game_format(bytes(data)) is None
+
+    def test_zcode_too_short(self) -> None:
+        data = bytearray(10)
+        data[0] = 5
+        assert detect_game_format(bytes(data)) is None
+
+    def test_zblorb(self) -> None:
+        # Build a minimal Blorb with ZCOD exec resource
+        # File layout: FORM(4)+size(4)+IFRS(4)+RIdx(4)+size(4)+count(4)+entry(12) = 36
+        # So the exec chunk (ZCOD) starts at absolute file offset 36.
+        ridx = b"RIdx"
+        ridx_data = (1).to_bytes(4, "big") + b"Exec" + (0).to_bytes(4, "big") + (36).to_bytes(4, "big")
+        ridx_chunk = ridx + len(ridx_data).to_bytes(4, "big") + ridx_data
+        zcod_chunk = b"ZCOD" + (0).to_bytes(4, "big")
+        form_data = b"IFRS" + ridx_chunk + zcod_chunk
+        blorb = b"FORM" + len(form_data).to_bytes(4, "big") + form_data
+        assert detect_game_format(blorb) == "zblorb"
+
+    def test_gblorb_with_glul_exec(self) -> None:
+        # Build a minimal Blorb with GLUL exec resource
+        ridx = b"RIdx"
+        ridx_data = (1).to_bytes(4, "big") + b"Exec" + (0).to_bytes(4, "big") + (36).to_bytes(4, "big")
+        ridx_chunk = ridx + len(ridx_data).to_bytes(4, "big") + ridx_data
+        glul_chunk = b"GLUL" + (0).to_bytes(4, "big")
+        form_data = b"IFRS" + ridx_chunk + glul_chunk
+        blorb = b"FORM" + len(form_data).to_bytes(4, "big") + form_data
+        assert detect_game_format(blorb) == "gblorb"
+
+
+# ── is_zcode_format ──
+
+
+class TestIsZcodeFormat:
+    def test_z5(self) -> None:
+        assert is_zcode_format("z5") is True
+
+    def test_z3(self) -> None:
+        assert is_zcode_format("z3") is True
+
+    def test_z8(self) -> None:
+        assert is_zcode_format("z8") is True
+
+    def test_zblorb(self) -> None:
+        assert is_zcode_format("zblorb") is True
+
+    def test_ulx(self) -> None:
+        assert is_zcode_format("ulx") is False
+
+    def test_gblorb(self) -> None:
+        assert is_zcode_format("gblorb") is False
+
 
 # ── find_game_file ──
 
@@ -56,6 +131,31 @@ class TestFindGameFile:
     def test_prefers_ulx_over_gblorb(self, tmp_path: Path) -> None:
         (tmp_path / "game.ulx").write_bytes(b"Glul" + b"\x00" * 10)
         (tmp_path / "game.gblorb").write_bytes(b"FORM\x00\x00\x00\x00IFRS")
+        result = find_game_file(tmp_path)
+        assert result is not None
+        assert result.name == "game.ulx"
+
+    def test_z5(self, tmp_path: Path) -> None:
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        (tmp_path / "game.z5").write_bytes(bytes(data))
+        result = find_game_file(tmp_path)
+        assert result is not None
+        assert result.name == "game.z5"
+
+    def test_zblorb(self, tmp_path: Path) -> None:
+        (tmp_path / "game.zblorb").write_bytes(b"\x00" * 10)
+        result = find_game_file(tmp_path)
+        assert result is not None
+        assert result.name == "game.zblorb"
+
+    def test_prefers_ulx_over_zcode(self, tmp_path: Path) -> None:
+        (tmp_path / "game.ulx").write_bytes(b"Glul" + b"\x00" * 10)
+        data = bytearray(64)
+        data[0] = 5
+        data[18:24] = b"250101"
+        (tmp_path / "game.z5").write_bytes(bytes(data))
         result = find_game_file(tmp_path)
         assert result is not None
         assert result.name == "game.ulx"
@@ -80,6 +180,14 @@ class TestGlulxSessionState:
         state_dir.mkdir()
         (state_dir / "autosave.json").write_text("{}")
         session = GlulxSession(sample_game_dir)
+        assert session.has_state() is True
+
+    def test_has_state_bocfel_style(self, sample_zcode_dir: Path) -> None:
+        """Bocfel saves state as {basename}-{story_id}.json, not autosave.json."""
+        state_dir = sample_zcode_dir / "state"
+        state_dir.mkdir()
+        (state_dir / "game-12345.json").write_text("{}")
+        session = GlulxSession(sample_zcode_dir)
         assert session.has_state() is True
 
     def test_clear_state(self, sample_game_dir: Path) -> None:
@@ -385,7 +493,7 @@ class TestRunTurn:
 
         with (
             patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc),
-            pytest.raises(RuntimeError, match="glulxe failed"),
+            pytest.raises(RuntimeError, match="Interpreter failed"),
         ):
             await session.run_turn(None)
 
@@ -402,7 +510,7 @@ class TestRunTurn:
     async def test_no_glulxe_binary(self, sample_game_dir: Path, tmp_path: Path) -> None:
         session = GlulxSession(sample_game_dir, tmp_path / "nonexistent")
 
-        with pytest.raises(FileNotFoundError, match="glulxe binary not found"):
+        with pytest.raises(FileNotFoundError, match="Interpreter binary not found"):
             await session.run_turn(None)
 
     @pytest.mark.asyncio
@@ -453,3 +561,53 @@ class TestRunTurn:
             _, metadata = await session.run_turn(None)
 
         assert metadata["input_window"] is None
+
+
+# ── Bocfel / Z-code session ──
+
+
+class TestBocfelSession:
+    @pytest.mark.asyncio
+    async def test_bocfel_initial_turn(self, sample_zcode_dir: Path, mock_bocfel_path: Path) -> None:
+        session = GlulxSession(sample_zcode_dir, interpreter_path=mock_bocfel_path)
+        output_data = make_remglk_output(text="Welcome to Zork.")
+        proc = _mock_process(remglk_stdout(output_data))
+
+        with patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+            text, metadata = await session.run_turn(None)
+
+        assert "Welcome to Zork." in text
+        assert metadata["gen"] == 1
+
+        # Verify bocfel-style command (no --autosave/--autodir flags)
+        args = mock_exec.call_args[0]
+        assert str(mock_bocfel_path) == args[0]
+        assert "-singleturn" in args
+        assert "-fm" in args
+        assert "--autosave" not in args
+        assert "--autodir" not in args
+
+    @pytest.mark.asyncio
+    async def test_bocfel_env_has_autosave_dir(self, sample_zcode_dir: Path, mock_bocfel_path: Path) -> None:
+        """Bocfel gets autosave directory via BOCFEL_AUTOSAVE_DIRECTORY env var."""
+        session = GlulxSession(sample_zcode_dir, interpreter_path=mock_bocfel_path)
+        output_data = make_remglk_output(text="Hello.")
+        proc = _mock_process(remglk_stdout(output_data))
+
+        with patch("mcp_server_if.session.asyncio.create_subprocess_exec", return_value=proc) as mock_exec:
+            await session.run_turn(None)
+
+        _, kwargs = mock_exec.call_args
+        env = kwargs["env"]
+        assert "BOCFEL_AUTOSAVE_DIRECTORY" in env
+        assert env["BOCFEL_AUTOSAVE_DIRECTORY"] == str(sample_zcode_dir / "state")
+
+    @pytest.mark.asyncio
+    async def test_bocfel_is_zcode_property(self, sample_zcode_dir: Path, mock_bocfel_path: Path) -> None:
+        session = GlulxSession(sample_zcode_dir, interpreter_path=mock_bocfel_path)
+        assert session._is_zcode is True
+
+    @pytest.mark.asyncio
+    async def test_glulx_is_not_zcode(self, sample_game_dir: Path, mock_glulxe_path: Path) -> None:
+        session = GlulxSession(sample_game_dir, mock_glulxe_path)
+        assert session._is_zcode is False
