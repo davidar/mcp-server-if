@@ -157,7 +157,7 @@ def _build_bocfel(
 
     if is_windows:
         cxx = "g++"
-        win_flags = f"-D_POSIX_THREAD_SAFE_FUNCTIONS -include {win_compat}"
+        win_flags = f"-DZTERP_OS_WIN32 -D_POSIX_THREAD_SAFE_FUNCTIONS -include {win_compat}"
         cxxflags = f"-O2 -Wall -Wno-unused {defines} {win_flags} {includes}"
         link_flags = "-static -lm"
         bin_name = "bocfel.exe"
@@ -165,7 +165,7 @@ def _build_bocfel(
         cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
         if cxx is None:
             raise RuntimeError("No C++ compiler found. Install g++ (gcc-c++ package).")
-        cxxflags = f"-O2 -Wall -Wno-unused -std=c++17 {defines} {includes}"
+        cxxflags = f"-O2 -Wall -Wno-unused -std=c++17 -DZTERP_OS_UNIX {defines} {includes}"
         link_flags = "-lm"
         bin_name = "bocfel"
 

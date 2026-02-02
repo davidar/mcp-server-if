@@ -279,6 +279,7 @@ class GlulxSession:
             str(self.interpreter_path),
             "-singleturn",
             "-fm",
+            "-H",  # Disable history playback (unnecessary with AutosaveLib)
             str(self.game_file),
         ]
         # Bocfel reads autosave config from environment variables

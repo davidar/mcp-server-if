@@ -14,11 +14,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from mcp_server_if.config import get_bundled_glulxe
+from mcp_server_if.config import get_bundled_bocfel, get_bundled_glulxe
 from mcp_server_if.session import GlulxSession
 
 ADVENT_URL = "https://www.ifarchive.org/if-archive/games/glulx/advent.ulx"
 INPUTEVENTTEST_URL = "https://eblong.com/zarf/glulx/inputeventtest.ulx"
+ZORK1_URL = "https://eblong.com/infocom/gamefiles/zork1-r119-s880429.z3"
 
 # Find glulxe binary: bundled first, then PATH
 glulxe_path = get_bundled_glulxe()
@@ -29,6 +30,13 @@ if glulxe_path is None:
 
 if glulxe_path is None:
     pytest.fail("glulxe binary not found — is the package built correctly?")
+
+# Find bocfel binary: bundled first, then PATH
+bocfel_path = get_bundled_bocfel()
+if bocfel_path is None:
+    found = shutil.which("bocfel")
+    if found:
+        bocfel_path = Path(found)
 
 pytestmark = pytest.mark.integration
 
@@ -188,3 +196,98 @@ async def test_char_input_return(char_game_dir: Path) -> None:
     text, metadata = await session.run_turn("return")
     assert "<return>" in text.lower()
     assert metadata["input_type"] == "line"
+
+
+# --- Z-code tests using Zork I via bocfel ---
+
+
+@pytest.fixture(scope="module")
+def zork_z3(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Download Zork I .z3 from eblong.com."""
+    if bocfel_path is None:
+        pytest.skip("bocfel binary not found — is the package built correctly?")
+
+    cache_dir = tmp_path_factory.mktemp("zork")
+    game_file = cache_dir / "game.z3"
+
+    response = httpx.get(ZORK1_URL, follow_redirects=True, timeout=30.0)
+    response.raise_for_status()
+    game_file.write_bytes(response.content)
+
+    return cache_dir
+
+
+@pytest.fixture
+def zcode_game_dir(zork_z3: Path, tmp_path: Path) -> Path:
+    """Create a fresh game directory with Zork I for each test."""
+    game_dir = tmp_path / "zork"
+    game_dir.mkdir()
+    shutil.copy2(zork_z3 / "game.z3", game_dir / "game.z3")
+    return game_dir
+
+
+@pytest.mark.asyncio
+async def test_zcode_initial_turn(zcode_game_dir: Path) -> None:
+    """Start Zork I and verify we get recognizable output."""
+    session = GlulxSession(zcode_game_dir, interpreter_path=bocfel_path)
+    text, metadata = await session.run_turn(None)
+
+    text_lower = text.lower()
+    assert any(keyword in text_lower for keyword in ("white house", "mailbox", "west of house")), (
+        f"Expected Zork intro text, got: {text[:300]}"
+    )
+
+    assert metadata["gen"] >= 1
+    assert metadata["input_type"] == "line"
+
+
+@pytest.mark.asyncio
+async def test_zcode_autosave_created(zcode_game_dir: Path) -> None:
+    """Verify that bocfel creates autosave state files after a turn."""
+    session = GlulxSession(zcode_game_dir, interpreter_path=bocfel_path)
+    await session.run_turn(None)
+
+    state_dir = zcode_game_dir / "state"
+    assert state_dir.exists(), "State directory should exist after a turn"
+
+    # Bocfel uses {game}-{release}-{serial}.json, not autosave.json
+    json_files = list(state_dir.glob("*.json"))
+    assert len(json_files) > 0, f"Expected bocfel state files in {state_dir}, found: {list(state_dir.iterdir())}"
+
+
+@pytest.mark.asyncio
+async def test_zcode_command(zcode_game_dir: Path) -> None:
+    """Send 'open mailbox' in Zork I and verify response."""
+    session = GlulxSession(zcode_game_dir, interpreter_path=bocfel_path)
+
+    # Initial turn
+    await session.run_turn(None)
+
+    # Open the mailbox
+    text, metadata = await session.run_turn("open mailbox")
+
+    text_lower = text.lower()
+    assert "leaflet" in text_lower, f"Expected 'leaflet' in response to 'open mailbox', got: {text[:300]}"
+    assert metadata["gen"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_zcode_autorestore(zcode_game_dir: Path) -> None:
+    """Verify autorestore works across bocfel session instances."""
+    # Session 1: start game and open the mailbox
+    session1 = GlulxSession(zcode_game_dir, interpreter_path=bocfel_path)
+    await session1.run_turn(None)
+    await session1.run_turn("open mailbox")
+
+    # Session 2: new instance, same game_dir — should autorestore
+    session2 = GlulxSession(zcode_game_dir, interpreter_path=bocfel_path)
+    assert session2.has_state(), "State should exist from session 1"
+
+    # Read the leaflet — only works if game state was restored (mailbox already open)
+    text, _metadata = await session2.run_turn("read leaflet")
+
+    # The game should have continued from saved state, not restarted
+    text_lower = text.lower()
+    assert any(keyword in text_lower for keyword in ("zork", "flood control", "dam", "leaflet", "forgotten")), (
+        f"Expected Zork leaflet content or continued gameplay, got: {text[:300]}"
+    )

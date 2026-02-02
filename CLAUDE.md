@@ -133,6 +133,16 @@ Wheel repair (`auditwheel`/`delocate`/`delvewheel`) is enabled on all platforms.
 ```
 After changing server code, run `/mcp` in Claude Code to reconnect. The server process caches config on startup, so binary changes require a restart.
 
+## Debugging Interpreter Issues
+
+When diagnosing bugs in the compiled interpreters (especially silent failures like the bocfel autosave bug where `-DZTERP_OS_UNIX` was missing):
+
+- **strace** via toolbox: `toolbox run -c fedora-toolbox-43 strace -f -e trace=openat,mkdir uv run pytest -k test_name -v` — reveals what file operations the binary performs (or doesn't). Showed bocfel made zero autosave-related syscalls.
+- **gdb** via toolbox (batch mode): `toolbox run -c fedora-toolbox-43 gdb -batch -ex "break zterp_os_autosave_name" -ex "run" -ex "bt" ./bocfel` — proved `zterp_os_autosave_name` hit the `return nullptr` stub (line 1040) instead of the Unix implementation (line 327), confirming `#ifdef ZTERP_OS_UNIX` wasn't compiled.
+- **strings**: `strings src/mcp_server_if/bin/bocfel | grep autosave` — quick check that autosave symbols exist in the binary (they did — the code was linked, but the wrong `#ifdef` branch was active).
+- **Debug build**: Rebuild bocfel with `-g -O0` into `deps/bocfel_debug/` for gdb. Both strace and gdb need `toolbox run` on immutable hosts (Bluefin).
+- **Silent failures**: The bocfel autosave bug was completely silent — bocfel ran correctly, produced valid output, but `open_savefile()` returned nullptr and `do_save()` returned false with no error message, no stderr, and no crash. Integration tests that verify state files exist on disk are essential to catch this class of bug.
+
 ## Testing with inputeventtest.ulx
 
 For integration testing of character input, use `inputeventtest.ulx` from https://eblong.com/zarf/glulx/inputeventtest.ulx — Andrew Plotkin's test game for char/line input events. The game has a `get character input` command that switches to char input mode and echoes back the character code received.
