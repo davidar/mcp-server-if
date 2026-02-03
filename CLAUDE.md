@@ -81,6 +81,7 @@ The build hook runs for `wheel`, `sdist`, and `editable` targets. It skips compi
 - **Windows MSYS2 build**: Uses MSYS2 MinGW-w64 toolchain (pre-installed on GitHub Actions windows-latest). Build hook auto-detects MSYS2 at `C:\msys64` or `MSYS2_ROOT` env var. Both glulxe and bocfel are statically linked (`-static`) to avoid MinGW runtime DLL dependencies.
 - **Bocfel C++ compiler**: Bocfel is C++17. The build hook searches for `c++`, `g++`, or `clang++` via `shutil.which()`. On immutable distros (e.g. Bluefin), build inside a toolbox: `toolbox run -c fedora-toolbox-43 uv sync --reinstall-package mcp-server-if`.
 - **Build caching**: The build hook skips compilation when binaries already exist in `src/mcp_server_if/bin/`. Use `--reinstall-package mcp-server-if` to force a rebuild.
+- **garglk fork**: The `deps/garglk` submodule points to `davidar/garglk` (not upstream `garglk/garglk`) because upstream's Windows `zterp_os_autosave_name()` ignores `options.autosave_directory`, breaking our autosave isolation. The fork adds a check for this option on Windows, matching the Unix behavior.
 
 ## Key Design Decisions
 
