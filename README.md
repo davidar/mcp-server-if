@@ -1,15 +1,15 @@
 # mcp-server-if
 
-An MCP (Model Context Protocol) server for playing Glulx interactive fiction games. Enables AI assistants like Claude to play text adventure games through a standardized interface.
+An MCP (Model Context Protocol) server for playing interactive fiction games. Enables AI assistants like Claude to play text adventure games through a standardized interface.
 
 ## Features
 
-- Play Glulx (.ulx) and Blorb (.gblorb) interactive fiction games
+- Play Glulx (.ulx, .gblorb) and Z-machine (.z3-.z8, .zblorb) games
 - Automatic game state persistence (save/restore between sessions)
 - Download games directly from the IF Archive
 - Optional journaling mode for reflective playthroughs
 - Works with Claude Desktop, Claude Code, and other MCP clients
-- Bundled glulxe interpreter (no manual compilation required)
+- Bundled interpreters (glulxe for Glulx, bocfel for Z-machine)
 
 ## Installation
 
@@ -21,7 +21,7 @@ uvx mcp-server-if
 pip install mcp-server-if
 ```
 
-The package includes a pre-compiled `glulxe` binary. No additional setup required.
+The package includes pre-compiled interpreters. No additional setup required.
 
 ## Configuration
 
@@ -31,6 +31,7 @@ The package includes a pre-compiled `glulxe` binary. No additional setup require
 |----------|-------------|---------|
 | `IF_GAMES_DIR` | Directory to store games | `~/.mcp-server-if/games` |
 | `IF_GLULXE_PATH` | Override path to glulxe binary | Bundled binary |
+| `IF_BOCFEL_PATH` | Override path to bocfel binary | Bundled binary |
 | `IF_REQUIRE_JOURNAL` | Require journal reflections | `false` |
 
 ### Command Line Arguments
@@ -105,10 +106,15 @@ search_journal(game="zork", query="treasure")
 
 ## Supported Game Formats
 
+**Glulx** (modern, uses glulxe interpreter):
 - `.ulx` - Raw Glulx game files
-- `.gblorb` - Blorb containers with Glulx games (may include graphics/sound)
+- `.gblorb` - Blorb containers with Glulx games
 
-Find games at the [IF Archive](https://ifarchive.org/indexes/if-archive/games/glulx/).
+**Z-machine** (classic Infocom format, uses bocfel interpreter):
+- `.z3`, `.z4`, `.z5`, `.z7`, `.z8` - Z-code game files
+- `.zblorb` - Blorb containers with Z-machine games
+
+Find games at the IF Archive: [Glulx games](https://ifarchive.org/indexes/if-archive/games/glulx/), [Z-code games](https://ifarchive.org/indexes/if-archive/games/zcode/).
 
 ## Journaling Mode
 
@@ -125,17 +131,20 @@ This encourages thoughtful, reflective gameplay rather than rushing through.
 
 1. Games are stored in `~/.mcp-server-if/games/{name}/`
 2. Each game directory contains:
-   - `game.ulx` or `game.gblorb` - the game file
+   - The game file (`.ulx`, `.gblorb`, `.z5`, etc.)
    - `state/` - autosave data (persists between sessions)
    - `metadata.json` - session metadata
    - `journal.jsonl` - playthrough journal (if enabled)
 
-3. The server uses glulxe's RemGlk mode for JSON-based I/O
-4. Game state is automatically saved after each turn
+3. The server selects the appropriate interpreter based on file format:
+   - Glulx games → glulxe
+   - Z-machine games → bocfel
+4. Both interpreters use RemGlk for JSON-based I/O
+5. Game state is automatically saved after each turn
 
 ## Development
 
-Requires [uv](https://docs.astral.sh/uv/), a C compiler (gcc or clang), make, and git.
+Requires [uv](https://docs.astral.sh/uv/), a C compiler (gcc or clang), a C++ compiler (g++ or clang++), make, and git.
 
 ```bash
 git clone --recursive https://github.com/davidar/mcp-server-if.git
@@ -144,7 +153,7 @@ uv sync --group dev
 uv run pytest -v
 ```
 
-`uv sync` compiles the bundled glulxe binary from C source automatically. If the binary is missing after a fresh clone, run `uv sync --reinstall-package mcp-server-if` to force recompilation.
+`uv sync` compiles the bundled interpreters (glulxe and bocfel) from source automatically. If binaries are missing after a fresh clone, run `uv sync --reinstall-package mcp-server-if` to force recompilation.
 
 ## Troubleshooting
 
@@ -169,5 +178,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Credits
 
 - [glulxe](https://github.com/erkyrath/glulxe) - The Glulx VM interpreter by Andrew Plotkin
+- [bocfel](https://github.com/garglk/garglk/tree/master/terps/bocfel) - Z-machine interpreter by Chris Spiegel
 - [RemGlk](https://github.com/erkyrath/remglk) - Remote Glk library for JSON I/O
 - [MCP](https://modelcontextprotocol.io/) - Model Context Protocol by Anthropic
