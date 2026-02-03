@@ -7,6 +7,7 @@ import json
 import re
 import sys
 from datetime import datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import TypedDict
 
@@ -387,6 +388,7 @@ async def search_journal(game: str, query: str) -> str:
 def main():
     """Main entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="MCP server for interactive fiction games")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version('mcp-server-if')}")
     parser.add_argument(
         "--games-dir",
         type=Path,
